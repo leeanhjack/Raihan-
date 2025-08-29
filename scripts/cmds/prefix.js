@@ -6,7 +6,7 @@ module.exports = {
   config: {
     name: "prefix",
     version: "1.5",
-    author: "Ew'r Saim",
+    author: "Raihan",
     countDown: 5,
     role: 0,
     description: "Change the bot prefix in your chat box or globally (admin only)",
@@ -133,9 +133,9 @@ module.exports = {
 ꫝ. ⏰ Time: ${currentTime}
 ꫝ. ⏳ Uptime: ${uptime}
 ꫝ. 👤 Your ID: ${event.senderID}
-ꫝ. ✍️ Dev: m፝֟ꫝƦᏌꘘツ모
+ꫝ. ✍️ Dev: RaiHanツ모
 ➤➤➤➤➤➤➤➤➤➤➤➤➤`,
-        attachment: await utils.getStreamFromURL("https://drive.google.com/uc?export=view&id=1GGQFVtn00J3hSLY2Nq5ptgD-XNMZHSAo")
+        attachment: await utils.getStreamFromURL("https://drive.google.com/uc?export=view&id=1LWrlzPLaClLNLZjsJMR46lmADae9CPdY")
       });
     }
   }
