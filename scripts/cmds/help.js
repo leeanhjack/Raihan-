@@ -1,127 +1,153 @@
-const { GoatWrapper } = require("fca-liane-utils");
-const fs = require("fs-extra");
-const axios = require("axios");
-const path = require("path");
 const { getPrefix } = global.utils;
-const { commands, aliases } = global.GoatBot;
-const doNotDelete = "[ F A H A D ]"; // changing this wont change the goatbot V2 of list cmd it is just a decoyy
+const { commands } = global.GoatBot;
+
+// Levenshtein distance for suggestions
+function levenshteinDistance(a, b) {
+  const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+  for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
+  for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
+
+  for (let j = 1; j <= b.length; j++) {
+    for (let i = 1; i <= a.length; i++) {
+      const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1,
+        matrix[j - 1][i] + 1,
+        matrix[j - 1][i - 1] + indicator
+      );
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Find closest command for suggestion
+function getClosestCommand(name) {
+  const lowerName = name.toLowerCase();
+  let closest = null;
+  let minDist = Infinity;
+
+  for (const cmdName of commands.keys()) {
+    const dist = levenshteinDistance(lowerName, cmdName.toLowerCase());
+    if (dist < minDist) {
+      minDist = dist;
+      closest = cmdName;
+    }
+  }
+
+  if (minDist <= 3) return closest;
+  return null;
+}
 
 module.exports = {
   config: {
     name: "help",
-    version: "1.17",
-    author: "NISAN",
-    usePrefix: false,
+    version: "2.3",
+    author: "raihan",
     countDown: 5,
     role: 0,
-    shortDescription: {
-      en: "View command usage and list all commands directly",
-    },
-    longDescription: {
-      en: "View command usage and list all commands directly",
-    },
+    shortDescription: { en: "View command usage and list all commands" },
+    longDescription: { en: "View command usage and list all commands directly with categories" },
     category: "info",
-    guide: {
-      en: "{pn} / help cmdName ",
-    },
+    guide: { en: "{pn} /help [category] or /help commandName" },
     priority: 1,
   },
 
-  onStart: async function ({ message, args, event, threadsData, role }) {
+  onStart: async function ({ message, args, event, role }) {
     const { threadID } = event;
-    const threadData = await threadsData.get(threadID);
     const prefix = getPrefix(threadID);
+    const categories = {};
 
-    if (args.length === 0) {
-      const categories = {};
-      let msg = "";
+    // Group commands by category
+    for (const [name, value] of commands) {
+      if (!value?.config || typeof value.onStart !== "function") continue;
+      if (value.config.role > 1 && role < value.config.role) continue;
 
-      msg += ``; // replace with your name 
+      const category = value.config.category?.toLowerCase() || "uncategorized";
+      if (!categories[category]) categories[category] = [];
+      categories[category].push(name);
+    }
 
-      for (const [name, value] of commands) {
-        if (value.config.role > 1 && role < value.config.role) continue;
+    const rawInput = args.join(" ").trim();
 
-        const category = value.config.category || "Uncategorized";
-        categories[category] = categories[category] || { commands: [] };
-        categories[category].commands.push(name);
+    // Show full list if no argument
+    if (!rawInput) {
+      let allCategories = Object.keys(categories).sort();
+
+      // Move image/gen categories to bottom
+      allCategories = allCategories.sort((a, b) => {
+        if (a.includes("image") || a.includes("gen")) return 1;
+        if (b.includes("image") || b.includes("gen")) return -1;
+        return a.localeCompare(b);
+      });
+
+      let msg = "╔═══════════════╗\n";
+      msg += "       𝑴𝒊𝒍𝒐𝒘 𝑯𝑬𝑳𝑷 𝑴𝑬𝑵𝑼\n";
+      msg += "╚═══════════════╝\n";
+
+      for (const category of allCategories) {
+        const cmdList = categories[category].sort((a, b) => a.localeCompare(b));
+        msg += `┍━━━━━━━━━[ ${category.toUpperCase()} ]\n`;
+
+        for (const cmdName of cmdList) {
+          msg += `┋〄 ${cmdName}\n`;
+        }
+
+        msg += "┕━━━━━━━━━━━━━━━◊\n";
       }
 
-      Object.keys(categories).forEach((category) => {
-        if (category !== "info") {
-          msg += `\n╭─────❃『  📛${category.toUpperCase()} 🦆💨 』`;
+      msg += "┍━━━[𝙸𝙽𝙵𝚁𝙾𝙼]━━━◊\n";
+      msg += `┋➥𝚃𝙾𝚃𝙰𝙻 𝙲𝙼𝙳: [${commands.size}]\n`;
+      msg += `┋➥𝙿𝚁𝙴𝙵𝙸𝚇: ${prefix}\n`;
+      msg += `┋𝙾𝚆𝙽𝙴𝚁: RaiHan\n`;
+      msg += "┕━━━━━━━━━━━◊";
 
-          const names = categories[category].commands.sort();
-          for (let i = 0; i < names.length; i += 3) {
-            const cmds = names.slice(i, i + 2).map((item) => `✨${item}✨`);
-            msg += `\n│${cmds.join(" ".repeat(Math.max(1, 5 - cmds.join("").length)))}`;
-          }
+      const replyMsg = await message.reply(msg);
+      setTimeout(() => { try { message.unsend(replyMsg.messageID) } catch {} }, 40 * 1000);
+      return;
+    }
 
-          msg += `\n╰────────────✦`;
-        }
-      });
+    // Command-specific info
+    const commandName = rawInput.toLowerCase();
+    const command = commands.get(commandName);
 
-      const totalCommands = commands.size;
-      msg += `\n\n╭─────❃[🦆𝙴𝙽𝙹𝙾𝚈🦆] |[🅜🅐🅡🅤🅕]\n | [ 🦆𝙹𝙾𝙸𝙽 𝙾𝚄𝚁 𝙶𝚁𝙾𝚄𝙿 𝚃𝚈𝙿𝙴: ${prefix}𝚂𝚄𝙿𝙿𝙾𝚁𝚃𝙶𝙲 ]\n | [🧠𝙳𝙰𝚈𝚁𝙴𝙲𝚃 𝙶𝚁𝙾𝚄𝙿 𝙻𝙸𝙽𝙺: //m.me/j/AbZGfIdes8qdzjsy/ ]\n│>𝚃𝙾𝚃𝙰𝙻 𝙲𝙼𝙳𝚂: [🧠${totalCommands}🦆].\n│𝚃𝚈𝙿𝙴:[ 🦆${prefix}𝙷𝙴𝙻𝙿 𝚃𝙾🦆\n│🦆<𝙲𝙼𝙳> 𝚃𝙾 𝙻𝙴𝙰𝚁𝙽 𝚃𝙷𝙴 𝚄𝚂𝙰𝙶𝙴.]\n╰────────────✦`;
-      msg += ``;
-      msg += `\n╭─────❃\n│ 🌟 | [📛𝙶𝙾𝙰𝚃𝙱𝙾𝚃📛│𝙾𝚆𝙽𝙴𝚁 𝙵𝙱 𝙸𝙳: Id diya tor kam ki?😴😴😴\n╰────────────✦`; 
-
-      const attachment = await axios.get("https://drive.google.com/uc?export=view&id=11YkL_SqXVeSF_ZDEpqwiDmZ5z_LdZGlp", { responseType: "stream" });
-
-      await message.reply({
-        body: msg,
-        attachment: attachment.data,
-      });
-    } else {
-      const commandName = args[0].toLowerCase();
-      const command = commands.get(commandName) || commands.get(aliases.get(commandName));
-
-      if (!command) {
-        await message.reply(`Command "${commandName}" not found.`);
+    if (!command || !command?.config) {
+      const suggestion = getClosestCommand(commandName);
+      if (suggestion) {
+        return message.reply(`❌ Command "${commandName}" not found.\n👉 Did you mean: "${suggestion}"?`);
       } else {
-        const configCommand = command.config;
-        const roleText = roleTextToString(configCommand.role);
-        const otherName=(configCommand.aliases);
-        const author = configCommand.author || "Unknown";
-
-        const longDescription = (configCommand.longDescription) ? (configCommand.longDescription.en) || "No description" : "No description";
-
-        const guideBody = configCommand.guide?.en || "No guide available.";
-        const usage = guideBody.replace(/{p}/g, prefix).replace(/{n}/g, configCommand.name);
-
-        const response = `╭── ⚠𝐍𝐀𝐌𝐄⚠ ────⭓
- │ ${configCommand.name}
- ├── 🦆𝐈𝐧𝐟𝐨🦆
- │ 🔰 𝙾𝚃𝙷𝙴𝚁 𝙽𝙰𝙼𝙴𝚂: ${otherName}
- │ 🦆𝙳𝚎𝚜𝚌𝚛𝚒𝚙𝚝𝚒𝚘𝚗: ${longDescription}
- │ 🔰𝙾𝚃𝙷𝙴𝚁 𝙽𝙰𝙼𝙴𝚂 𝙸𝙽 𝚈𝙾𝚄𝚁 𝙶𝚁𝙾𝚄𝙿: ${configCommand.aliases ? configCommand.aliases.join(", ") : "𝙳𝙾 𝙽𝙾𝚃 𝙷𝙰𝚅𝙴"}
- │ 🦆𝚅𝚎𝚛𝚜𝚒𝚘𝚗: ${configCommand.version || "1.0"}
- │ 🔰𝚁𝚘𝚕𝚎: ${roleText}
- │ 🦆𝚃𝚒𝚖𝚎 𝚙𝚎𝚛 𝚌𝚘𝚖𝚖𝚊𝚗𝚍: ${configCommand.countDown || 1}s
- │ 🔰𝙰𝚞𝚝𝚑𝚘𝚛: ${author}
- ├── 🔰𝐔𝐬𝐚𝐠𝐞🔰
- │ ${usage}
- ├──⚠𝐍𝐨𝐭𝐞𝐬⚠
- │ 🔳𝚃𝚑𝚎 𝚌𝚘𝚗𝚝𝚎𝚗𝚝 inside <𝙳𝙸𝙳𝙰𝚁> 𝚌𝚊𝚗 𝚋𝚎 𝚌𝚑𝚊𝚗𝚐𝚎𝚍
- │ 🔳𝚃𝚑𝚎 𝚌𝚘𝚗𝚝𝚎𝚗𝚝 inside [𝙰|𝙱|𝙲] 𝚒𝚜 𝚊 𝚘𝚛 𝚋 𝚘𝚛 𝚌
- ╰━━━━━━━❖`;
-
-        await message.reply(response);
+        return message.reply(`❌ Command "${commandName}" not found.\nTry: /help or /help [category]`);
       }
     }
+
+    const configCommand = command.config;
+    const roleText = roleTextToString(configCommand.role);
+    const longDescription = configCommand.longDescription?.en || "No description available.";
+    const guideBody = configCommand.guide?.en || "No guide available.";
+    const usage = guideBody.replace(/{pn}/g, `${prefix}${configCommand.name}`);
+
+    const msg = `
+╔══ [ COMMAND INFO ] ══╗
+┋🧩 Name       : ${configCommand.name}
+┋🗂️ Category   : ${configCommand.category || "Uncategorized"}
+┋📜 Description: ${longDescription}
+┋⚙️ Version    : ${configCommand.version || "1.0"}
+┋🔐 Permission : ${configCommand.role} (${roleText})
+┋⏱️ Cooldown   : ${configCommand.countDown || 5}s
+┋👑 Author     : raihan
+┋📖 Usage      : ${usage}
+╚══════════════╝`;
+
+    const replyMsg = await message.reply(msg);
+    setTimeout(() => { try { message.unsend(replyMsg.messageID) } catch {} }, 40 * 1000);
   },
 };
 
-function roleTextToString(roleText) {
-  switch (roleText) {
-    case 0:
-      return ("0 (All users)");
-    case 1:
-      return ("1 (Group administrators)");
-    case 2:
-      return ("2 (Admin bot)");
-    default:
-      return ("Unknown role");
+// Convert role number to string
+function roleTextToString(role) {
+  switch (role) {
+    case 0: return "All users";
+    case 1: return "Group Admins";
+    case 2: return "Bot Admins";
+    default: return "Unknown";
   }
-  const wrapper = new GoatWrapper(module.exports);
-wrapper.applyNoPrefix({ allowPrefix: true });
-    }
+}
